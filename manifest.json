@@ -5,6 +5,6 @@
 	"minAppVersion": "0.9.12",
 	"description": "Enhanced mindmap plugin with multi-select nodes and zoom control panel.",
 	"author": "小刚刚",
-	"authorUrl": "https://github.com/MarkMindCkm/obsidian-enhancing-mindmap",
+	"authorUrl": "https://github.com/tiancaizhouya/xg-obmindmap",
 	"isDesktopOnly": false
 }

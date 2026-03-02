@@ -1,93 +1,46 @@
-# obsidian-enhancing-mindmap-plugin
+# xg-obmindmap
 
+面向 Obsidian 的增强脑图插件，支持多选与键盘优先操作。
 
-![test](https://user-images.githubusercontent.com/18719494/124454742-63ec8580-ddbb-11eb-8da0-7cd44f38a225.gif)
+- 仓库地址：https://github.com/tiancaizhouya/xg-obmindmap
+- 插件 ID：`xg-obmindmap`
+- 作者：`小刚刚`
 
-## 输出的 markdown 样式:
+## 主要功能
 
-```
----
-
-mindmap-plugin: basic
-
----
-
-# Enhancing Mind map
-
-## Links
-- <https://github.com/MarkMindLtd/obsidian-enhancing-mindmap>
-- [GitHub](https://github.com/MarkMindLtd/obsidian-enhancing-mindmap)
-
-## Related
-- [coc-markmap](https://github.com/gera2ld/coc-markmap)
-- [gatsby-remark-markmap](https://github.com/gera2ld/gatsby-remark-markmap)
-
-## Features
-- links
-- **inline** ~~text~~ *styles*
-- multiline
-   text
-- `inline code`
-- Katex - $x = {-b \pm \sqrt{b^2-4ac} \over 2a}$
-```
-## 注意
-
-该插件支持如上以及无序列表等有限的markdown格式，无法支持其他格式，一定要注意这点，否则可能会丢失数据，切记。
-
-## Short cuts
-
-| 新建脑图             | Ctrl/Cmd+P       |
-| ------------------------- | ---------------- |
-| 新增子节点            | Tab              |
-| 新增兄弟节点          | enter            |
-| 删除节点               | Delete           |
-| 编辑节点                 | Space/dblclick node|
-| 后退                      | Ctrl/Cmd+Z       |
-| 前进                      | Ctrl/Cmd+Y       |
-| 取消编辑节点            | Tab              |
-| 展开节点               | Ctrl/Cmd + /     |
-| 收缩节点             | Ctrl/Cmd + /     |
-| 拖动节点  | Drag and drop node |
-| 切换节点                 | Up/down/left/right |
-| 放大、缩小                 | Ctrl/Cmd + 滚轮 |
-| 居中          | Ctrl/Cmd + E |
-
-## 功能
-
-1. 编辑节点
-2. 拖动节点至某节点
-3. 前进/后退
-4. 在markdown和思维导图视图之间切换  
-5. 数据同步
-...
-
-![test (2)](https://user-images.githubusercontent.com/18719494/124458786-fd1d9b00-ddbf-11eb-8dbc-eeefb5b7abf5.gif)
+- 思维导图与 Markdown 双向编辑
+- `Shift/Ctrl/Cmd + 鼠标拖拽` 框选多节点
+- 多节点批量移动、批量删除（单次撤销）
+- 拖拽预览提示（上方/下方/子节点）
+- 键盘节点操作：
+  - `Enter`：新增同级节点
+  - `Tab`：新增子节点
+  - `Delete/Backspace`：删除选中节点
+  - `Space`：编辑节点
+- 键盘剪贴板操作：
+  - `Ctrl/Cmd + C`：复制选中节点
+  - `Ctrl/Cmd + X`：剪切选中节点
+  - `Ctrl/Cmd + V`：粘贴到当前选中节点
+  - 未选中任何节点时，自动粘贴到根节点
 
 ## 手动安装
-1. 下载文件
-2. 解压至obsidian: <vault>/.obsidian/plugins/
-3. 注意: 在某些系统中 .obsidian文件夹是隐藏的，在 macos 系统上，使用 Command+Shift+Dot 显示文件夹.
-4. 重启软件
-5. 打开安全模式
 
+1. 构建或下载发布文件。
+2. 将插件目录复制到：
+   - `<vault>/.obsidian/plugins/xg-obmindmap`
+3. 目录下至少包含：
+   - `main.js`
+   - `manifest.json`
+   - `styles.css`
+4. 在 Obsidian 社区插件中启用 `xg-obmindmap`。
 
-## 计划
-1. 更多的主题背景
-2. 更多的布局方式
-3. 导出到图片和 opml
-4. 导入 opml 和 xmind 文件
+## 开发
 
-## 开发者
-1. 欢迎提 pull request  😀
-2. 如果您会css,那么您可以自己修改思维导图节点样式
+```bash
+npm install
+npm run build
+```
 
-## 捐款
-  您也可以通过捐款支持我<br>
-<a href="https://www.buymeacoffee.com/markmind"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=markmind&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff"></a>
-<br>
+## 更新记录
 
-<img src="https://user-images.githubusercontent.com/18719494/124471790-e3844f80-ddcf-11eb-83c6-c5c16996c206.png" width="200px"/>
-  
-
-
-
+见 [CHANGELOG.md](./CHANGELOG.md)。
