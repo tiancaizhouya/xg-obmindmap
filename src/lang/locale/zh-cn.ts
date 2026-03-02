@@ -6,7 +6,11 @@ export default {
   "Create new mindmap": "创建新思维导图",
   "New mindmap board": "新建思维导图",
   "Untitled mindmap": "未命名思维导图",
+  "Default root title": "从这里开始：输入你的中心主题",
   "Open as markdown": "打开为 Markdown 文件",
+  "Drop before node": "插入到该节点上方",
+  "Drop after node": "插入到该节点下方",
+  "Drop as child node": "成为该节点子节点",
 
   //Execute.ts
   "Sub title":"新节点",

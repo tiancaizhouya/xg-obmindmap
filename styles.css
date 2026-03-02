@@ -57,6 +57,15 @@
   border-radius: 0.25rem;
 }
 
+.mm-node.mm-node-drop-target .mm-node-content {
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+  border-radius: 6px;
+}
+
+.mm-node.mm-node-drop-child-target .mm-node-content {
+  box-shadow: 0 0 0 2px var(--interactive-accent), inset 0 0 0 9999px rgba(59, 130, 246, 0.08);
+}
+
 .mm-node-bar {
   position: absolute;
   height: 12px;
@@ -173,3 +182,115 @@
   fill: #333;
 }
 
+/* ===== Drag & Drop Preview ===== */
+.mm-drop-preview-line {
+  position: absolute;
+  height: 3px;
+  background: var(--interactive-accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  z-index: 120;
+  pointer-events: none;
+}
+
+.mm-drop-preview-line::before,
+.mm-drop-preview-line::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.mm-drop-preview-line::before {
+  left: -2px;
+}
+
+.mm-drop-preview-line::after {
+  right: -2px;
+}
+
+.mm-drop-preview-label {
+  position: absolute;
+  min-width: 128px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--background-primary);
+  border: 1px solid var(--interactive-accent);
+  color: var(--text-normal);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  white-space: nowrap;
+  z-index: 121;
+  pointer-events: none;
+}
+
+/* ===== Box Selection Rectangle ===== */
+.mm-selection-box {
+  position: absolute;
+  border: 2px dashed var(--interactive-accent);
+  background: rgba(59, 130, 246, 0.1);
+  z-index: 99999;
+  pointer-events: none;
+}
+
+/* ===== Zoom Control Panel ===== */
+.mm-zoom-panel {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  opacity: 0.85;
+  transition: opacity 0.2s;
+  user-select: none;
+}
+
+.mm-zoom-panel:hover {
+  opacity: 1;
+}
+
+.mm-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  transition: background 0.15s;
+}
+
+.mm-zoom-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.mm-zoom-slider {
+  width: 100px;
+  height: 4px;
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
+}
+
+.mm-zoom-label {
+  font-size: 12px;
+  min-width: 40px;
+  text-align: center;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

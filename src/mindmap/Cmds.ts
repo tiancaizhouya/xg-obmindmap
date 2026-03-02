@@ -21,6 +21,45 @@ export abstract class Command {
     }
 }
 
+export class BatchCommand extends Command {
+    commands: Command[];
+    alreadyExecuted: boolean;
+    constructor(commands: Command[], name = 'batch', alreadyExecuted = false) {
+        super(name);
+        this.commands = commands.slice();
+        this.alreadyExecuted = alreadyExecuted;
+    }
+    execute(): boolean {
+        if (this.alreadyExecuted) {
+            this.alreadyExecuted = false;
+            return this.commands.length > 0;
+        }
+        const executed: Command[] = [];
+        for (const command of this.commands) {
+            if (command.execute()) {
+                executed.push(command);
+            } else {
+                for (let i = executed.length - 1; i >= 0; i--) {
+                    executed[i].undo();
+                }
+                return false;
+            }
+        }
+        this.commands = executed;
+        return this.commands.length > 0;
+    }
+    undo() {
+        for (let i = this.commands.length - 1; i >= 0; i--) {
+            this.commands[i].undo();
+        }
+    }
+    redo() {
+        for (const command of this.commands) {
+            command.redo();
+        }
+    }
+}
+
 export class AddNode extends Command {
     node:INode;
     parent:INode = null;
@@ -300,6 +339,7 @@ export class ExpandNode extends Command{
     data:any
     waitCollapse:any[]=[]
     firstNode:INode
+    pastedRootNodes:INode[] = []
     constructor(node:any, data:any) {
         super('copyNode');
         this.node = node;
@@ -314,15 +354,20 @@ export class ExpandNode extends Command{
     }
 
     undo() {
-        if (this.firstNode) {
-            this.mind.removeNode(this.firstNode);
-            this.node.clearCacheData();
-           // this.updateItems(this.node);
-            this.refresh(this.node.mindmap);
-        }
+        if (!this.pastedRootNodes.length) return;
+        this.pastedRootNodes
+            .slice()
+            .reverse()
+            .forEach((rootNode: INode) => {
+                this.mind.removeNode(rootNode);
+            });
+        this.node.clearCacheData();
+        this.refresh(this.node.mindmap);
     }
 
     paste() {
+        this.pastedRootNodes = [];
+        this.firstNode = null;
         this.data.forEach((d:any, i:number) => {
 
             var n = new INode(d, this.mind);
@@ -331,10 +376,13 @@ export class ExpandNode extends Command{
             if (!d.isExpand) {
                 this.waitCollapse.push(n);
             }
-            if (i == 0) {
+            if (i == 0 || d.pid == null) {
                 n.data.pid = this.node.getId();
                 this.mind.addNode(n, this.node);
-                this.firstNode = n;
+                if (!this.firstNode) {
+                    this.firstNode = n;
+                }
+                this.pastedRootNodes.push(n);
                 n.setPosition(0,0);
                 n.refreshBox();
 

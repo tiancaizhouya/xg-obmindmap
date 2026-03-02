@@ -16,16 +16,10 @@ import { INodeData } from './mindmap/INode'
 import { Transformer } from './markmapLib/markmap-lib';
 import randomColor from "randomcolor";
 import { t } from './lang/helpers'
+import { uuid } from './utils/uuid'
 
 // import domtoimage from './domtoimage.js'
 import domtoimage from './dom-to-image-more.js'
-
-export function uuid(): string {
-  function S4() {
-    return (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
-  }
-  return (S4() + S4() + '-' + S4() + '-' + S4());
-}
 const transformer = new Transformer();
 
 
@@ -62,7 +56,7 @@ export class MindMapView extends TextFileView implements HoverParent {
          colors = this.plugin.settings.strokeArray;
       }
     }catch(err){
-       console.log(err,'stroke array is error');
+       console.error('Invalid stroke array setting', err);
     }
 
     this.colors = this.colors.concat(colors);
@@ -282,7 +276,7 @@ export class MindMapView extends TextFileView implements HoverParent {
         this.requestSave();
         //new Notice(`${t("Save success")}`);
        }catch(err){
-        console.log(err);
+        console.error('Mindmap save failed', err);
         new Notice(`${t("Save fail")}`)
       }
     }
@@ -531,7 +525,10 @@ export class MindMapView extends TextFileView implements HoverParent {
 
     // })
 
-    super.onPaneMenu(menu,'more-options');
+    const superOnPaneMenu = (TextFileView.prototype as any).onPaneMenu;
+    if (typeof superOnPaneMenu === 'function') {
+      superOnPaneMenu.call(this, menu, 'more-options');
+    }
   }
 
 }

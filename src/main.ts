@@ -4,7 +4,8 @@ import {
   TFile,
   TFolder,
   ViewState,
-  MarkdownView
+  MarkdownView,
+  addIcon
 } from 'obsidian';
 // import DEFAULT_SETTINGS from './setting'
 import { around } from 'monkey-around'
@@ -15,6 +16,24 @@ import { MindMapView, mindmapViewType } from "./MindMapView";
 import { frontMatterKey, basicFrontmatter } from './constants';
 import { t } from './lang/helpers'
 
+const XG_MINDMAP_RIBBON_ICON = `
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="50" y1="50" x2="22" y2="22" />
+    <line x1="50" y1="50" x2="78" y2="22" />
+    <line x1="50" y1="50" x2="22" y2="78" />
+    <line x1="50" y1="50" x2="78" y2="78" />
+    <line x1="50" y1="50" x2="50" y2="14" />
+    <circle cx="50" cy="50" r="11" fill="currentColor" />
+    <circle cx="22" cy="22" r="8" />
+    <circle cx="78" cy="22" r="8" />
+    <circle cx="22" cy="78" r="8" />
+    <circle cx="78" cy="78" r="8" />
+    <circle cx="50" cy="14" r="7" />
+  </g>
+</svg>
+`;
+
 
 export default class MindMapPlugin extends Plugin {
   settings: MindMapSettings;
@@ -22,9 +41,24 @@ export default class MindMapPlugin extends Plugin {
   _loaded: boolean = false;
   timeOut: any = null;
 
+  private getModeKey(filePath: string, leaf?: WorkspaceLeaf): string {
+    const leafId = leaf ? (leaf as unknown as { id?: string }).id : undefined;
+    return leafId || filePath;
+  }
+
   async onload() {
 
     await this.loadSettings();
+
+    addIcon('xg-obmindmap-ribbon', XG_MINDMAP_RIBBON_ICON);
+    this.addRibbonIcon('xg-obmindmap-ribbon', `${t('Create new mindmap')}`, () => {
+      const targetFolder = this.app.fileManager.getNewFileParent(
+        this.app.workspace.getActiveFile()?.path || ""
+      );
+      if (targetFolder) {
+        this.newMindMap(targetFolder);
+      }
+    });
 
     this.addCommand({
       id: 'Create New MindMap',
@@ -222,7 +256,6 @@ export default class MindMapPlugin extends Plugin {
               // var text = (node.data.oldText as string);
               var text = (node.data.oldText);
               node.setText(text);
-              console.log(text+" / "+node.data.text);
           }
   }
       }
@@ -1221,7 +1254,7 @@ export default class MindMapPlugin extends Plugin {
         `${t('Untitled mindmap')}`
       );
 
-      await this.app.vault.modify(mindmap, basicFrontmatter);
+      await this.app.vault.modify(mindmap, `${basicFrontmatter}\n# ${t('Default root title')}\n`);
        setTimeout(async ()=>{
           await this.app.workspace.getLeaf().setViewState({
             type: mindmapViewType,
@@ -1269,7 +1302,7 @@ export default class MindMapPlugin extends Plugin {
 
   registerEvents() {
     this.registerEvent(
-      this.app.workspace.on("file-menu", (menu, file: TFile,source:string,leaf?:WorkspaceLeaf) => {
+      this.app.workspace.on("file-menu", (menu, file: TFile | TFolder,source:string,leaf?:WorkspaceLeaf) => {
         // Add a menu item to the folder context menu to create a board
         if (file instanceof TFolder) {
           menu.addItem((item) => {
@@ -1282,19 +1315,22 @@ export default class MindMapPlugin extends Plugin {
 
         //add markdown view menu  open as mind map view
 
-        if(leaf&&this.mindmapFileModes[leaf.id||file.path] == 'markdown'){
-             const cache = this.app.metadataCache.getFileCache(file);
-             if(cache?.frontmatter && cache.frontmatter[frontMatterKey]){
-                  menu.addItem((item) => {
-                   item
-                   .setTitle(`${t('Open as mindmap board')}`)
-                   .setIcon("document")
-                   .onClick(() => {
-                     this.mindmapFileModes[leaf.id || file.path] = mindmapViewType;
-                     this.setMindMapView(leaf);
-                   });
-                 }).addSeparator();
+        if(leaf && file instanceof TFile){
+          const modeKey = this.getModeKey(file.path, leaf);
+          if(this.mindmapFileModes[modeKey] == 'markdown'){
+            const cache = this.app.metadataCache.getFileCache(file);
+            if(cache?.frontmatter && cache.frontmatter[frontMatterKey]){
+              menu.addItem((item) => {
+                item
+                .setTitle(`${t('Open as mindmap board')}`)
+                .setIcon("document")
+                .onClick(() => {
+                  this.mindmapFileModes[modeKey] = mindmapViewType;
+                  this.setMindMapView(leaf);
+                });
+              }).addSeparator();
             }
+          }
         }
       })
     );

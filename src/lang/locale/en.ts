@@ -6,7 +6,11 @@ export default {
     "Create new mindmap": "Create new mindmap",
     "New mindmap board": "New mindmap board",
     "Untitled mindmap": "Untitled mindmap",
+    "Default root title": "Start here: define your central topic",
     "Open as markdown": "Open as markdown",
+    "Drop before node": "Insert before this node",
+    "Drop after node": "Insert after this node",
+    "Drop as child node": "Insert as a child of this node",
 
     //Execute.ts
     "Sub title":"Sub title",

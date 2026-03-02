@@ -1,6 +1,6 @@
 import History from './History'
 import * as cmd from './Cmds'
-import { uuid } from '../MindMapView'
+import { uuid } from '../utils/uuid'
 import {t} from '../lang/helpers'
 import INode from './INode'
 
@@ -31,6 +31,12 @@ interface DataProps {
 
 export default class Exec{
     history:History = new History(50);
+    startBatch(name?: string) {
+        this.history.startBatch(name);
+    }
+    endBatch() {
+        this.history.endBatch();
+    }
     execute(name:string,data?:DataProps){
         var l_return = null;
         switch(name){
@@ -61,14 +67,11 @@ export default class Exec{
                 }
                 break;
             case 'moveNode':
-                console.log("inHistory:");
-                console.log(data.inHistory);
-                if(data.inHistory === undefined || data.inHistory == true) {
-                    if(data){
-                    this.history.execute(new cmd.MoveNode(data));
-                }
-                } else {// inHistory == false
-                    if(data){
+                if(data){
+                    const shouldRecordHistory = data.inHistory === undefined || data.inHistory == true;
+                    if (shouldRecordHistory) {
+                        this.history.execute(new cmd.MoveNode(data));
+                    } else {
                         (new cmd.MoveNode(data)).execute();
                     }
                 }

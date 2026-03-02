@@ -2,10 +2,10 @@ import INode, { INodeData } from './INode'
 import Layout from './Layout'
 import { Notice, Platform } from 'obsidian'
 import SVG from 'svg.js'
-import { MindMapView } from '../MindMapView'
+import type { MindMapView } from '../MindMapView'
 import { frontMatterKey, basicFrontmatter } from '../constants';
 import Exec from './Execute'
-import {uuid} from '../MindMapView'
+import {uuid} from '../utils/uuid'
 
 import importXmind  from './import/xmindZen'
 import jsZip from 'jszip'
@@ -38,8 +38,23 @@ export default class MindMap {
     editNode?: INode;
     selectNode?: INode;
     lastSelectedNode?: INode;
-    // selectingNodes?:boolean;
-    // selectedNodes?: INode[];
+    // Multi-select support
+    selectedNodes: Set<INode> = new Set();
+    _selectionBox: HTMLElement = null;
+    _isBoxSelecting: boolean = false;
+    _boxStartX: number = 0;
+    _boxStartY: number = 0;
+    _boxStartClientX: number = 0;
+    _boxStartClientY: number = 0;
+    _isShiftPressed: boolean = false;
+    _isCtrlPressed: boolean = false;
+    _isMetaPressed: boolean = false;
+    // Zoom panel
+    _zoomPanel: HTMLElement;
+    _zoomLabel: HTMLElement;
+    _zoomSlider: HTMLInputElement;
+    _zoomInBtn: HTMLElement;
+    _zoomOutBtn: HTMLElement;
     setting: Setting;
     data: INodeData;
     drag?: boolean;
@@ -62,6 +77,9 @@ export default class MindMap {
     _indicateDom:HTMLElement;
     _menuDom:HTMLElement;
     _dragType:string='';
+    _dropHintLine: HTMLElement = null;
+    _dropHintLabel: HTMLElement = null;
+    _dropTargetNode: INode = null;
     _left:number;
     _top:number;
     dispLevel:number;
@@ -116,6 +134,19 @@ export default class MindMap {
         this.contentEL.appendChild(this._indicateDom);
         this.contentEL.appendChild(this._menuDom);
 
+        // Selection box for marquee/lasso selection
+        this._selectionBox = document.createElement('div');
+        this._selectionBox.classList.add('mm-selection-box');
+        this._selectionBox.style.display = 'none';
+        this._selectionBox.style.position = 'fixed';
+        document.body.appendChild(this._selectionBox);
+
+        // Drop preview UI
+        this._initDropPreview();
+
+        // Zoom control panel (appended to containerEL so it's not affected by transform)
+        this._initZoomPanel();
+
         //history
         this.exec = new Exec();
 
@@ -139,6 +170,8 @@ export default class MindMap {
 
         this.appMouseDown = this.appMouseDown.bind(this);
         this.appMouseUp = this.appMouseUp.bind(this);
+        this.globalKeydown = this.globalKeydown.bind(this);
+        this.globalKeyup = this.globalKeyup.bind(this);
 
         this.appFocusIn = this.appFocusIn.bind(this);
         this.appFocusOut = this.appFocusOut.bind(this);
@@ -162,6 +195,403 @@ export default class MindMap {
         deleteNodeDom.innerHTML = deleteIcon;
         this._menuDom.appendChild(addNodeDom);
         this._menuDom.appendChild(deleteNodeDom);
+    }
+
+    _showNodeMenu(node: INode) {
+        if (!node) {
+            this._menuDom.style.display = 'none';
+            return;
+        }
+
+        const box = node.getBox();
+        const menuWidth = 56;
+        const offset = 10;
+        const isLeftBranch = node.direct == 'left';
+        const left = isLeftBranch ? box.x - menuWidth - offset : box.x + box.width + offset;
+        const top = box.y + box.height / 2 - 14;
+
+        this._menuDom.style.left = `${left}px`;
+        this._menuDom.style.top = `${top}px`;
+        this._menuDom.style.display = 'block';
+    }
+
+    _initZoomPanel() {
+        this._zoomPanel = document.createElement('div');
+        this._zoomPanel.classList.add('mm-zoom-panel');
+
+        this._zoomOutBtn = document.createElement('span');
+        this._zoomOutBtn.classList.add('mm-zoom-btn');
+        this._zoomOutBtn.textContent = '−';
+        this._zoomOutBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.setScale('down');
+        });
+
+        this._zoomSlider = document.createElement('input') as HTMLInputElement;
+        this._zoomSlider.type = 'range';
+        this._zoomSlider.min = '20';
+        this._zoomSlider.max = '300';
+        this._zoomSlider.step = '10';
+        this._zoomSlider.value = String(this.mindScale);
+        this._zoomSlider.classList.add('mm-zoom-slider');
+        this._zoomSlider.addEventListener('input', (e) => {
+            e.stopPropagation();
+            const val = parseInt(this._zoomSlider.value);
+            this.scale(val);
+        });
+        // Prevent zoom panel interactions from triggering canvas events
+        this._zoomSlider.addEventListener('mousedown', (e) => e.stopPropagation());
+
+        this._zoomInBtn = document.createElement('span');
+        this._zoomInBtn.classList.add('mm-zoom-btn');
+        this._zoomInBtn.textContent = '+';
+        this._zoomInBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.setScale('up');
+        });
+
+        this._zoomLabel = document.createElement('span');
+        this._zoomLabel.classList.add('mm-zoom-label');
+        this._zoomLabel.textContent = `${this.mindScale}%`;
+
+        this._zoomPanel.appendChild(this._zoomOutBtn);
+        this._zoomPanel.appendChild(this._zoomSlider);
+        this._zoomPanel.appendChild(this._zoomInBtn);
+        this._zoomPanel.appendChild(this._zoomLabel);
+
+        // Prevent zoom panel clicks from propagating to canvas
+        this._zoomPanel.addEventListener('mousedown', (e) => e.stopPropagation());
+        this._zoomPanel.addEventListener('click', (e) => e.stopPropagation());
+
+        this.containerEL.appendChild(this._zoomPanel);
+    }
+
+    _syncZoomUI() {
+        if (this._zoomSlider) {
+            this._zoomSlider.value = String(this.mindScale);
+        }
+        if (this._zoomLabel) {
+            this._zoomLabel.textContent = `${this.mindScale}%`;
+        }
+    }
+
+    _initDropPreview() {
+        this._dropHintLine = document.createElement('div');
+        this._dropHintLine.classList.add('mm-drop-preview-line');
+        this._dropHintLine.style.display = 'none';
+        this.contentEL.appendChild(this._dropHintLine);
+
+        this._dropHintLabel = document.createElement('div');
+        this._dropHintLabel.classList.add('mm-drop-preview-label');
+        this._dropHintLabel.style.display = 'none';
+        this.contentEL.appendChild(this._dropHintLabel);
+    }
+
+    _getDropPreviewMode(dragType: string) {
+        if (!dragType) return '';
+        if (dragType.indexOf('child') > -1) return 'child';
+        if (dragType == 'top' || dragType == 'left') return 'before';
+        return 'after';
+    }
+
+    _getDropHintText(mode: string) {
+        if (mode == 'before') return t('Drop before node');
+        if (mode == 'after') return t('Drop after node');
+        return t('Drop as child node');
+    }
+
+    _clearDropPreview() {
+        if (this._dropTargetNode) {
+            this._dropTargetNode.containEl.classList.remove('mm-node-drop-target');
+            this._dropTargetNode.containEl.classList.remove('mm-node-drop-child-target');
+            this._dropTargetNode = null;
+        }
+
+        if (this._dropHintLine) {
+            this._dropHintLine.style.display = 'none';
+            this._dropHintLine.style.width = '0';
+        }
+
+        if (this._dropHintLabel) {
+            this._dropHintLabel.style.display = 'none';
+            this._dropHintLabel.textContent = '';
+        }
+    }
+
+    _renderDropPreview(node: INode, dragType: string) {
+        if (!node || !dragType) {
+            this._clearDropPreview();
+            return;
+        }
+
+        const mode = this._getDropPreviewMode(dragType);
+        if (!mode) {
+            this._clearDropPreview();
+            return;
+        }
+
+        if (this._dropTargetNode && this._dropTargetNode !== node) {
+            this._dropTargetNode.containEl.classList.remove('mm-node-drop-target');
+            this._dropTargetNode.containEl.classList.remove('mm-node-drop-child-target');
+        }
+
+        node.containEl.classList.add('mm-node-drop-target');
+        node.containEl.classList.remove('mm-node-drop-child-target');
+        if (mode == 'child') {
+            node.containEl.classList.add('mm-node-drop-child-target');
+        }
+
+        const box = node.getBox();
+        const lineY = mode == 'before' ? box.y - 3 : box.y + box.height + 3;
+        const labelX = Math.max(0, box.x + box.width / 2 - 64);
+
+        this._dropHintLabel.textContent = this._getDropHintText(mode);
+        this._dropHintLabel.style.display = 'block';
+        this._dropHintLabel.style.left = `${labelX}px`;
+
+        if (mode == 'child') {
+            this._dropHintLine.style.display = 'none';
+            this._dropHintLabel.style.top = `${box.y - 24}px`;
+        } else {
+            this._dropHintLine.style.display = 'block';
+            this._dropHintLine.style.left = `${box.x - 6}px`;
+            this._dropHintLine.style.top = `${lineY}px`;
+            this._dropHintLine.style.width = `${box.width + 12}px`;
+            this._dropHintLabel.style.top = `${lineY - 22}px`;
+        }
+
+        this._dropTargetNode = node;
+    }
+
+    _isAncestorNode(ancestor: INode, node: INode) {
+        let p = node?.parent;
+        while (p) {
+            if (p == ancestor) return true;
+            p = p.parent;
+        }
+        return false;
+    }
+
+    _getSelectedNodesInTreeOrder() {
+        const selected = new Set(this.selectedNodes);
+        const ordered: INode[] = [];
+        this.traverseDF((node: INode) => {
+            if (selected.has(node)) {
+                ordered.push(node);
+            }
+        }, this.root, true);
+        return ordered;
+    }
+
+    _getTopLevelSelectedNodes() {
+        const selected = this._getSelectedNodesInTreeOrder();
+        const selectedSet = new Set(selected);
+        return selected.filter((node: INode) => {
+            let p = node.parent;
+            while (p) {
+                if (selectedSet.has(p)) return false;
+                p = p.parent;
+            }
+            return true;
+        });
+    }
+
+    _deleteCurrentSelection() {
+        let nodesToDelete: INode[] = [];
+        if (this.selectedNodes.size > 0) {
+            nodesToDelete = this._getTopLevelSelectedNodes();
+        } else if (this.selectNode) {
+            nodesToDelete = [this.selectNode];
+        }
+
+        nodesToDelete = nodesToDelete
+            .filter((node: INode) => node && !node.data.isRoot && !node.data.isEdit)
+            .reverse();
+
+        if (!nodesToDelete.length) return false;
+
+        this.exec.startBatch('delete-selected');
+        try {
+            nodesToDelete.forEach((node: INode) => {
+                node.mindmap.execute("deleteNodeAndChild", { node });
+            });
+        } finally {
+            this.exec.endBatch();
+        }
+
+        this.clearAllSelectedNodes();
+        this._menuDom.style.display = 'none';
+        return true;
+    }
+
+    _moveSelectedNodes(dropNode: INode, dragType: string) {
+        const validNodes = this._getTopLevelSelectedNodes().filter((node: INode) => {
+            if (!node || node.data.isRoot) return false;
+            if (node == dropNode) return false;
+            if (this._isAncestorNode(node, dropNode)) return false;
+            return true;
+        });
+
+        if (!validNodes.length) return;
+
+        const isChildMove = dragType.indexOf('child') > -1;
+        const moveQueue = isChildMove ? validNodes : validNodes.slice().reverse();
+        this.exec.startBatch('move-selected');
+        try {
+            moveQueue.forEach((node: INode) => {
+                this.moveNode(node, dropNode, dragType, true);
+            });
+        } finally {
+            this.exec.endBatch();
+        }
+
+        this.clearAllSelectedNodes();
+    }
+
+    _getClipboardSourceNodes() {
+        if (this.selectedNodes.size > 0) {
+            return this._getTopLevelSelectedNodes();
+        }
+        if (this.selectNode) {
+            return [this.selectNode];
+        }
+        return [];
+    }
+
+    _copySelectionToClipboard() {
+        const sourceNodes = this._getClipboardSourceNodes();
+        if (!sourceNodes.length) return false;
+        const payload = this.copyNodes(sourceNodes);
+        if (!payload) return false;
+        navigator.clipboard.writeText(payload);
+        return true;
+    }
+
+    _cutSelectionToClipboard() {
+        const sourceNodes = this._getClipboardSourceNodes();
+        const removableNodes = sourceNodes.filter((node: INode) => node && !node.data.isRoot && !node.data.isEdit);
+        if (!removableNodes.length) return false;
+        const payload = this.copyNodes(removableNodes);
+        if (!payload) return false;
+        navigator.clipboard.writeText(payload);
+
+        this.exec.startBatch('cut-selected');
+        try {
+            removableNodes
+                .slice()
+                .reverse()
+                .forEach((node: INode) => {
+                    node.mindmap.execute("deleteNodeAndChild", { node });
+                });
+        } finally {
+            this.exec.endBatch();
+        }
+
+        this.clearAllSelectedNodes();
+        this._menuDom.style.display = 'none';
+        return true;
+    }
+
+    // === Multi-select helpers ===
+
+    clearAllSelectedNodes() {
+        this.selectedNodes.forEach(n => n.unSelect());
+        this.selectedNodes.clear();
+    }
+
+    _addToSelection(node: INode) {
+        node.containEl.classList.add('mm-node-select');
+        node.containEl.setAttribute('draggable', 'true');
+        this.selectedNodes.add(node);
+    }
+
+    _removeFromSelection(node: INode) {
+        node.containEl.classList.remove('mm-node-select');
+        node.containEl.setAttribute('draggable', 'false');
+        this.selectedNodes.delete(node);
+    }
+
+    _toggleSelection(node: INode) {
+        if (this.selectedNodes.has(node)) {
+            this._removeFromSelection(node);
+        } else {
+            this._addToSelection(node);
+        }
+    }
+
+    _selectRange(fromNode: INode, toNode: INode) {
+        // Range select: select siblings between fromNode and toNode
+        if (!fromNode || !toNode) return;
+        if (!fromNode.parent || !toNode.parent) return;
+        if (fromNode.parent !== toNode.parent) {
+            // Not siblings, just add toNode
+            this._addToSelection(toNode);
+            return;
+        }
+        const siblings = fromNode.parent.children;
+        const idx1 = siblings.indexOf(fromNode);
+        const idx2 = siblings.indexOf(toNode);
+        if (idx1 === -1 || idx2 === -1) return;
+        const start = Math.min(idx1, idx2);
+        const end = Math.max(idx1, idx2);
+        for (let i = start; i <= end; i++) {
+            this._addToSelection(siblings[i]);
+        }
+    }
+
+    _showSelectionBox() {
+        if (this._selectionBox) {
+            this._selectionBox.style.display = 'block';
+        }
+    }
+
+    _hideSelectionBox() {
+        if (this._selectionBox) {
+            this._selectionBox.style.display = 'none';
+            this._selectionBox.style.width = '0';
+            this._selectionBox.style.height = '0';
+        }
+    }
+
+    _updateSelectionBox(evt: MouseEvent) {
+        const currentX = evt.clientX;
+        const currentY = evt.clientY;
+        const sx = this._boxStartClientX;
+        const sy = this._boxStartClientY;
+
+        const left = Math.min(sx, currentX);
+        const top = Math.min(sy, currentY);
+        const width = Math.abs(currentX - sx);
+        const height = Math.abs(currentY - sy);
+
+        this._selectionBox.style.left = `${left}px`;
+        this._selectionBox.style.top = `${top}px`;
+        this._selectionBox.style.width = `${width}px`;
+        this._selectionBox.style.height = `${height}px`;
+    }
+
+    _finishBoxSelect() {
+        // Get selection box rectangle in viewport coordinates
+        const boxLeft = parseFloat(this._selectionBox.style.left) || 0;
+        const boxTop = parseFloat(this._selectionBox.style.top) || 0;
+        const boxWidth = parseFloat(this._selectionBox.style.width) || 0;
+        const boxHeight = parseFloat(this._selectionBox.style.height) || 0;
+        const boxRight = boxLeft + boxWidth;
+        const boxBottom = boxTop + boxHeight;
+
+        if (boxWidth < 5 && boxHeight < 5) return; // Too small, ignore
+
+        // Traverse all visible nodes and check intersection
+        this.traverseDF((node: INode) => {
+            if (node.isHide) return;
+            if (node.data.isRoot) return;
+            const nb = node.containEl.getBoundingClientRect();
+            // Check AABB intersection
+            if (nb.x < boxRight && nb.x + nb.width > boxLeft &&
+                nb.y < boxBottom && nb.y + nb.height > boxTop) {
+                this._addToSelection(node);
+            }
+        });
     }
 
     setAppSetting() {
@@ -279,26 +709,8 @@ export default class MindMap {
             }
             this.editNode = null;
         }
-
-        // if(this.selectingNodes)
-        // {// Add the node to the selectedNodes
-        //     this.selectedNodes.push(this.selectNode);
-        // }
-        // else {
-        //     this.selectedNodes = [];
-        // }
-        // console.log(this.selectedNodes.length+" selected: "+this.selectedNodes);
-
-        // if (this.selectNode) {
-        //     this.selectNode.unSelect();
-        //     this.selectNode = null
-        // }
-        // if (this.editNode) {
-        //     if(this.editNode.data.isEdit){
-        //         this.editNode.cancelEdit();
-        //     }
-        //     this.editNode = null;
-        // }
+        // Clear multi-selection
+        this.clearAllSelectedNodes();
     }
 
 
@@ -319,7 +731,11 @@ export default class MindMap {
         if(Platform.isDesktop){
             this.appEl.addEventListener('mousedown', this.appMouseDown);
             this.appEl.addEventListener('mouseup', this.appMouseUp);
+            document.addEventListener('mouseup', this.appMouseUp);
         }
+
+        document.addEventListener('keydown', this.globalKeydown, true);
+        document.addEventListener('keyup', this.globalKeyup, true);
 
         this.appEl.addEventListener('mousemove', this.appMouseMove);
 
@@ -350,7 +766,11 @@ export default class MindMap {
         if(Platform.isDesktop){
             this.appEl.removeEventListener('mousedown', this.appMouseDown);
             this.appEl.removeEventListener('mouseup', this.appMouseUp);
+            document.removeEventListener('mouseup', this.appMouseUp);
         }
+
+        document.removeEventListener('keydown', this.globalKeydown, true);
+        document.removeEventListener('keyup', this.globalKeyup, true);
 
         this.appEl.removeEventListener('mousemove', this.appMouseMove);
 
@@ -393,11 +813,54 @@ export default class MindMap {
         this.isFocused = false;
     }
     appKeydown(e: KeyboardEvent) {
-        if (!this.isFocused) return; // Check if Mindmap is in focus or not
         var keyCode = e.keyCode || e.which || e.charCode;
+        const isDeleteKey = (keyCode == 46 || keyCode == 8 || e.key == 'Delete' || e.key == 'Backspace');
+        if (!this.isFocused) {
+            if (isDeleteKey && this.selectedNodes.size > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                this._deleteCurrentSelection();
+            }
+            return;
+        } // Check if Mindmap is in focus or not
+        if (this.isComposing) return;
         var ctrlKey = e.ctrlKey || e.metaKey;
         var shiftKey = e.shiftKey;
         var altKey = e.altKey;
+
+        if (ctrlKey && !shiftKey && !altKey) {
+            const key = e.key.toLowerCase();
+            const hasSelection = this.selectedNodes.size > 0 || !!this.selectNode;
+            const isEditingNode = !!this.selectNode?.data?.isEdit;
+
+            // Mod + C: copy selected/top-level selected nodes
+            if (key == 'c' && hasSelection && !isEditingNode) {
+                if (this._copySelectionToClipboard()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+            }
+
+            // Mod + X: cut selected/top-level selected nodes
+            if (key == 'x' && hasSelection && !isEditingNode) {
+                if (this._cutSelectionToClipboard()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+            }
+
+            // Mod + V: paste under selected node; fallback to root when no node selected
+            if (key == 'v' && !isEditingNode) {
+                e.preventDefault();
+                e.stopPropagation();
+                navigator.clipboard.readText().then((text) => {
+                    this.pasteNode(text);
+                });
+                return;
+            }
+        }
 
         // if (ctrlKey) {                         // Shift -> Selecting
         //     // ctrl -> selecting
@@ -407,12 +870,66 @@ export default class MindMap {
         // }
 
         if (!ctrlKey && !shiftKey && !altKey) { // No special key
-            // // tab
-            // // tab (OK) / Insert (OK)
-            // if (keyCode == 9 || keyCode == 45) {
-            //     e.preventDefault();
-            //     e.stopPropagation();
-            // }
+            // Enter: add sibling node / end edit
+            if (keyCode == 13 || e.key == 'Enter') {
+                const node = this.selectNode;
+                if (node) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!node.data.isEdit) {
+                        if (node.parent) {
+                            const newNode = node.mindmap.execute('addSiblingNode', {
+                                parent: node.parent
+                            });
+                            if (newNode) {
+                                this.moveNode(newNode, node, 'down', false);
+                            }
+                        }
+                    } else {
+                        this.clearSelectNode();
+                        node.select();
+                        node.mindmap.editNode = null;
+                    }
+                    this._menuDom.style.display = 'none';
+                    return;
+                }
+            }
+
+            // Delete/Backspace: delete selected node
+            if (isDeleteKey) {
+                if (this._deleteCurrentSelection()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+            }
+
+            // Space: enter edit mode
+            if (keyCode == 32 || e.key == ' ') {
+                const node = this.selectNode;
+                if (node && !node.data.isEdit) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    node.edit();
+                    this._menuDom.style.display = 'none';
+                    return;
+                }
+            }
+
+            // Tab / Insert: add child node
+            if (keyCode == 9 || keyCode == 45 || e.key == 'Tab' || e.key == 'Insert') {
+                const node = this.selectNode;
+                if (node && !node.data.isEdit) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!node.isExpand) {
+                        node.expand();
+                    }
+                    node.mindmap.execute("addChildNode", { parent: node });
+                    this._menuDom.style.display = 'none';
+                    return;
+                }
+            }
 
             // // Space
             // if (keyCode == 32) {
@@ -1503,6 +2020,7 @@ export default class MindMap {
     }
 
     appClickFn(evt: MouseEvent) {
+        this.isFocused = true;
         var targetEl = evt.target as HTMLElement;
 
         if (targetEl) {
@@ -1549,7 +2067,7 @@ export default class MindMap {
 
                  if(targetEl.closest('.mm-icon-delete-node')){
                     var selectNode = this.selectNode;
-                    if(!node.data.isRoot && selectNode){
+                    if(selectNode && !selectNode.data.isRoot){
                        selectNode.mindmap.execute("deleteNodeAndChild", { node: selectNode });
                        this._menuDom.style.display='none';
                     }
@@ -1560,15 +2078,32 @@ export default class MindMap {
             if (targetEl.closest('.mm-node')) {
                 var id = targetEl.closest('.mm-node').getAttribute('data-id');
                 var node = this.getNodeById(id);
-                if (!node.isSelect) {
-                    this.clearSelectNode();
+
+                if (evt.ctrlKey || evt.metaKey) {
+                    // Ctrl/Cmd + click: toggle multi-select
+                    this._toggleSelection(node);
+                    // Also set as primary selectNode for reference
                     this.selectNode = node;
-                    this.selectNode?.select();
-                    // this._menuDom.style.display='block';
+                    this.lastSelectedNode = node;
                     this._menuDom.style.display='none';
-                    var box = this.selectNode.getBox();
-                    // this._menuDom.style.left = `${box.x + box.width + 10}px`;
-                    // this._menuDom.style.top = `${box.y + box.height/2 - 14}px`;
+                } else if (evt.shiftKey) {
+                    // Shift + click: range select siblings
+                    const anchor = this.lastSelectedNode || this.selectNode;
+                    if (anchor) {
+                        this._selectRange(anchor, node);
+                    } else {
+                        this._addToSelection(node);
+                    }
+                    this.selectNode = node;
+                    this._menuDom.style.display='none';
+                } else {
+                    // Normal click: clear all, select single
+                    if (!node.isSelect) {
+                        this.clearSelectNode();
+                        this.selectNode = node;
+                        this.selectNode?.select();
+                    }
+                    this._showNodeMenu(node);
                 }
             } else {
                 this.clearSelectNode();
@@ -1581,6 +2116,7 @@ export default class MindMap {
         evt.stopPropagation();
         this.startX = evt.pageX;
         this.startY = evt.pageY;
+        this._clearDropPreview();
         if (evt.target instanceof HTMLElement) {
             if (evt.target.closest('.mm-node')) {
                 var id = evt.target.closest('.mm-node').getAttribute('data-id');
@@ -1594,6 +2130,7 @@ export default class MindMap {
         this.drag = false;
         this._indicateDom.style.display = 'none'
         this._menuDom.style.display = 'none';
+        this._clearDropPreview();
     }
 
     appDragover(evt: MouseEvent) {
@@ -1605,12 +2142,21 @@ export default class MindMap {
 
         if (this.drag) {
             this.dx = x - this.startX;
-            this.dx = y - this.startY;
+            this.dy = y - this.startY;
         }
 
         if(target.closest('.mm-node')){
             var nodeId =target.closest('.mm-node').getAttribute('data-id');
             var node = this.getNodeById(nodeId);
+            const invalidSelfDrop = node == this._dragNode;
+            const invalidSelectedTarget = this.selectedNodes.size > 1 &&
+                this.selectedNodes.has(this._dragNode) &&
+                this.selectedNodes.has(node);
+            if (invalidSelfDrop || invalidSelectedTarget) {
+                this._indicateDom.style.display = 'none';
+                this._clearDropPreview();
+                return;
+            }
             var box = node.getBox();
             this._dragType = this._getDragType(node, x, y);
             this._indicateDom.style.display = 'block';
@@ -1635,8 +2181,10 @@ export default class MindMap {
                     this._indicateDom.classList.add('mm-arrow-right');
                 }
             }
+            this._renderDropPreview(node, this._dragType);
         }else{
             this._indicateDom.style.display = 'none';
+            this._clearDropPreview();
         }
 
     }
@@ -1701,6 +2249,14 @@ export default class MindMap {
                 evt.preventDefault();
                 var dropNodeId = evt.target.closest('.mm-node').getAttribute('data-id');
                 var dropNode = this.getNodeById(dropNodeId);
+                const isDroppingOnSelected = this.selectedNodes.size > 1 &&
+                    this.selectedNodes.has(this._dragNode) &&
+                    this.selectedNodes.has(dropNode);
+                if (isDroppingOnSelected) {
+                    this._indicateDom.style.display = 'none';
+                    this._clearDropPreview();
+                    return;
+                }
                 if (this._dragNode.data.isRoot) {
 
                 } else {
@@ -1710,8 +2266,14 @@ export default class MindMap {
                         this.pasteNode(copiedNode);
 
                     }
-                    else {// Move the node
-                        this.moveNode(this._dragNode, dropNode,this._dragType);
+                    else {
+                        // Batch move: if dragged node is in selectedNodes, move all selected
+                        if (this.selectedNodes.size > 1 && this.selectedNodes.has(this._dragNode)) {
+                            this._moveSelectedNodes(dropNode, this._dragType);
+                        } else {
+                            // Single node move (original behavior)
+                            this.moveNode(this._dragNode, dropNode, this._dragType);
+                        }
                     }
                 }
             }
@@ -1758,6 +2320,7 @@ export default class MindMap {
 
         this._indicateDom.style.display = 'none'
         this._menuDom.style.display = 'none';
+        this._clearDropPreview();
     }
 
     appMouseOverFn(evt: MouseEvent) {
@@ -1778,6 +2341,12 @@ export default class MindMap {
     }
 
     appMouseMove(evt: MouseEvent) {
+        // If box selecting, update the selection rectangle and skip other logic
+        if (this._isBoxSelecting) {
+            this._updateSelectionBox(evt);
+            return;
+        }
+
         const targetEl = evt.target as HTMLElement;
         this.scalePointer = [];
         this.scalePointer.push(evt.offsetX, evt.offsetY);
@@ -1798,17 +2367,52 @@ export default class MindMap {
     }
 
     appMouseDown(evt:MouseEvent){
+        this.isFocused = true;
         const targetEl = evt.target as HTMLElement;
         if(!targetEl.closest('.mm-node')){
-            this.drag = true;
-            this.startX = evt.pageX;
-            this.startY = evt.pageY;
-            this._left = this.containerEL.scrollLeft;
-            this._top = this.containerEL.scrollTop;
+            const isShift = evt.shiftKey || evt.getModifierState('Shift') || this._isShiftPressed;
+            const isCtrl = evt.ctrlKey || evt.getModifierState('Control') || this._isCtrlPressed;
+            const isMeta = evt.metaKey || evt.getModifierState('Meta') || this._isMetaPressed;
+            const isBoxSelectModifier = isShift || isCtrl || isMeta;
+            if (isBoxSelectModifier) {
+                // Shift/Ctrl/Cmd + drag on empty area = box selection mode
+                this._isBoxSelecting = true;
+                const rect = this.containerEL.getBoundingClientRect();
+                this._boxStartX = evt.pageX - rect.left + this.containerEL.scrollLeft;
+                this._boxStartY = evt.pageY - rect.top + this.containerEL.scrollTop;
+                this._boxStartClientX = evt.clientX;
+                this._boxStartClientY = evt.clientY;
+                this._showSelectionBox();
+                evt.preventDefault();
+            } else {
+                // Normal drag: pan canvas
+                this.drag = true;
+                this.startX = evt.pageX;
+                this.startY = evt.pageY;
+                this._left = this.containerEL.scrollLeft;
+                this._top = this.containerEL.scrollTop;
+            }
         }
     }
 
+    globalKeydown(evt: KeyboardEvent) {
+        if (evt.key == 'Shift') this._isShiftPressed = true;
+        if (evt.key == 'Control') this._isCtrlPressed = true;
+        if (evt.key == 'Meta') this._isMetaPressed = true;
+    }
+
+    globalKeyup(evt: KeyboardEvent) {
+        if (evt.key == 'Shift') this._isShiftPressed = false;
+        if (evt.key == 'Control') this._isCtrlPressed = false;
+        if (evt.key == 'Meta') this._isMetaPressed = false;
+    }
+
     appMouseUp(evt:MouseEvent){
+        if (this._isBoxSelecting) {
+            this._isBoxSelecting = false;
+            this._finishBoxSelect();
+            this._hideSelectionBox();
+        }
         this.drag = false;
     }
 
@@ -1873,6 +2477,9 @@ export default class MindMap {
     clear() {
         this.clearNode();
         this.removeEvent();
+        if (this._selectionBox?.parentElement) {
+            this._selectionBox.parentElement.removeChild(this._selectionBox);
+        }
         this.draw?.clear();
     }
     //get node list rect point
@@ -1949,10 +2556,10 @@ export default class MindMap {
         else if (type.indexOf('child') > -1) {
             var typeArr = type.split('-');
             if (typeArr[1]) {
-                this.execute('moveNode', { type: 'child', node: dragNode, oldParent: dragNode.parent, parent: dropNode, direct: typeArr[1] })
+                this.execute('moveNode', { type: 'child', node: dragNode, oldParent: dragNode.parent, parent: dropNode, direct: typeArr[1], inHistory: setInHistory })
             }
             else {
-                this.execute('moveNode', { type: 'child', node: dragNode, oldParent: dragNode.parent, parent: dropNode });
+                this.execute('moveNode', { type: 'child', node: dragNode, oldParent: dragNode.parent, parent: dropNode, inHistory: setInHistory });
             }
         }
 
@@ -2039,12 +2646,10 @@ export default class MindMap {
     }
     undo() {
         this.exec.undo();
-        console.log("Undo");
     }
 
     redo() {
         this.exec.redo();
-        console.log("Redo");
     }
 
     addNode(node: INode, parent?: INode, index = -1) {
@@ -2376,7 +2981,8 @@ export default class MindMap {
         } else {
             this.appEl.style.transform = "scale(" + this.mindScale / 100 + ")";
         }
-
+        // Sync zoom panel UI
+        this._syncZoomUI();
     }
 
     setScale(type: string) {
@@ -2386,52 +2992,51 @@ export default class MindMap {
             var n = this.mindScale - 10;
         }
         this.scale(n);
-
-        if (this.timeOut) {
-            clearTimeout(this.timeOut)
-        }
-
-        this.timeOut = setTimeout(() => {
-            new Notice(`${n} %`);
-        }, 600);
     }
 
     copyNode(node?:any){
         var n = node||this.selectNode;
         if(n){
-           var data:any = [];
-           function copyNode(n:INode, pid:any) {
-                  var d = n.getData();
-                  d.id = uuid();
-                  d.pid = pid;
-                  data.push({
-                      id:d.id,
-                      text:d.text,
-                      pid:pid,
-                      isExpand:d.isExpand,
-                      note:d.note
-                  });
-                  n.children.forEach((c) => {
-                     copyNode(c, d.id);
-                  });
-          }
-
-           copyNode(n,null)
-
-           var _data = {
-               type:'copyNode',
-               text:data
-           };
-
-           return JSON.stringify(_data);
-
+           return this.copyNodes([n]);
         }else{
             return ''
         }
   }
 
+  copyNodes(nodes: INode[]) {
+        if(!nodes || !nodes.length){
+            return '';
+        }
+        var data:any = [];
+        function serializeNode(n:INode, pid:any) {
+            var d = n.getData();
+            const id = uuid();
+            data.push({
+                id:id,
+                text:d.text,
+                pid:pid,
+                isExpand:d.isExpand,
+                note:d.note
+            });
+            n.children.forEach((c) => {
+                serializeNode(c, id);
+            });
+        }
+
+        nodes.forEach((n: INode) => {
+            serializeNode(n, null);
+        });
+
+        var _data = {
+            type:'copyNode',
+            text:data
+        };
+        return JSON.stringify(_data);
+  }
+
   pasteNode(text:string){
-        var node = this.selectNode;
+        var node = this.selectNode || this.root;
+        if (!node) return;
         if(text){
             try{
                   var json =JSON.parse(text);
@@ -2445,11 +3050,9 @@ export default class MindMap {
                        node:node,
                        data:data
                    })
-
-                   navigator.clipboard.writeText('');
                   }
             }catch(err){
-                console.log(err)
+                console.error('Failed to parse pasted node payload', err);
             }
         }
 

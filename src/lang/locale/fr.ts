@@ -6,7 +6,11 @@ export default {
     "Create new mindmap": "Créer une nouvelle carte mentale",
     "New mindmap board": "Nouvelle carte mentale",
     "Untitled mindmap": "Carte mentale sans titre",
+    "Default root title": "Commencez ici : définissez votre thème central",
     "Open as markdown": "Ouvrir en tant que markdown",
+    "Drop before node": "Insérer avant ce nœud",
+    "Drop after node": "Insérer après ce nœud",
+    "Drop as child node": "Insérer comme enfant de ce nœud",
 
     //Execute.ts
     "Sub title":"Sous-titre",
