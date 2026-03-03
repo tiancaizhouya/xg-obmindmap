@@ -8868,6 +8868,32 @@ class MindMap {
         }
         return [];
     }
+    _writeClipboardText(text) {
+        try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText == 'function') {
+                navigator.clipboard.writeText(text);
+                return true;
+            }
+        }
+        catch (err) {
+        }
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', 'true');
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            const copied = document.execCommand('copy');
+            document.body.removeChild(textarea);
+            return copied;
+        }
+        catch (err) {
+            return false;
+        }
+    }
     _copySelectionToClipboard() {
         const sourceNodes = this._getClipboardSourceNodes();
         if (!sourceNodes.length)
@@ -8875,8 +8901,7 @@ class MindMap {
         const payload = this.copyNodes(sourceNodes);
         if (!payload)
             return false;
-        navigator.clipboard.writeText(payload);
-        return true;
+        return this._writeClipboardText(payload);
     }
     _cutSelectionToClipboard() {
         const sourceNodes = this._getClipboardSourceNodes();
@@ -8886,7 +8911,8 @@ class MindMap {
         const payload = this.copyNodes(removableNodes);
         if (!payload)
             return false;
-        navigator.clipboard.writeText(payload);
+        if (!this._writeClipboardText(payload))
+            return false;
         this.exec.startBatch('cut-selected');
         try {
             removableNodes
@@ -9119,6 +9145,7 @@ class MindMap {
         document.addEventListener('compositionstart', this.compositionStart);
         document.addEventListener('compositionend', this.compositionEnd);
         document.body.addEventListener('mousewheel', this.appMousewheel);
+        document.body.addEventListener('wheel', this.appMousewheel, { passive: false });
         if (obsidian.Platform.isDesktop) {
             this.appEl.addEventListener('mousedown', this.appMouseDown);
             this.appEl.addEventListener('mouseup', this.appMouseUp);
@@ -9147,6 +9174,7 @@ class MindMap {
         document.removeEventListener('compositionstart', this.compositionStart);
         document.removeEventListener('compositionend', this.compositionEnd);
         document.body.removeEventListener('mousewheel', this.appMousewheel);
+        document.body.removeEventListener('wheel', this.appMousewheel, { passive: false });
         if (obsidian.Platform.isDesktop) {
             this.appEl.removeEventListener('mousedown', this.appMouseDown);
             this.appEl.removeEventListener('mouseup', this.appMouseUp);
@@ -9208,12 +9236,32 @@ class MindMap {
         var ctrlKey = e.ctrlKey || e.metaKey;
         var shiftKey = e.shiftKey;
         var altKey = e.altKey;
-        if (ctrlKey && !shiftKey && !altKey) {
+        if (ctrlKey && !altKey) {
             const key = e.key.toLowerCase();
             const hasSelection = this.selectedNodes.size > 0 || !!this.selectNode;
             const isEditingNode = !!((_b = (_a = this.selectNode) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.isEdit);
+            // Mod + Z / Mod + Shift + Z / Ctrl + Y
+            if (!isEditingNode) {
+                if (key == 'z') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (shiftKey) {
+                        this.redo();
+                    }
+                    else {
+                        this.undo();
+                    }
+                    return;
+                }
+                if (key == 'y' && !shiftKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.redo();
+                    return;
+                }
+            }
             // Mod + C: copy selected/top-level selected nodes
-            if (key == 'c' && hasSelection && !isEditingNode) {
+            if (!shiftKey && key == 'c' && hasSelection && !isEditingNode) {
                 if (this._copySelectionToClipboard()) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -9221,7 +9269,7 @@ class MindMap {
                 }
             }
             // Mod + X: cut selected/top-level selected nodes
-            if (key == 'x' && hasSelection && !isEditingNode) {
+            if (!shiftKey && key == 'x' && hasSelection && !isEditingNode) {
                 if (this._cutSelectionToClipboard()) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -9229,7 +9277,7 @@ class MindMap {
                 }
             }
             // Mod + V: paste under selected node; fallback to root when no node selected
-            if (key == 'v' && !isEditingNode) {
+            if (!shiftKey && key == 'v' && !isEditingNode) {
                 e.preventDefault();
                 e.stopPropagation();
                 navigator.clipboard.readText().then((text) => {
@@ -10387,30 +10435,33 @@ class MindMap {
     appMouseDown(evt) {
         this.isFocused = true;
         const targetEl = evt.target;
+        const isShift = evt.shiftKey || evt.getModifierState('Shift') || this._isShiftPressed;
+        const isCtrl = evt.ctrlKey || evt.getModifierState('Control') || this._isCtrlPressed;
+        const isMeta = evt.metaKey || evt.getModifierState('Meta') || evt.getModifierState('OS') || this._isMetaPressed;
+        const isBoxSelectModifier = isShift || isCtrl || isMeta;
+        const isInteractiveControl = !!(targetEl.closest('.mm-node-menu') ||
+            targetEl.closest('.mm-node-bar') ||
+            targetEl.closest('a'));
+        if (isBoxSelectModifier && !isInteractiveControl) {
+            // Shift/Ctrl/Cmd + drag anywhere on canvas = box selection mode
+            this._isBoxSelecting = true;
+            const rect = this.containerEL.getBoundingClientRect();
+            this._boxStartX = evt.pageX - rect.left + this.containerEL.scrollLeft;
+            this._boxStartY = evt.pageY - rect.top + this.containerEL.scrollTop;
+            this._boxStartClientX = evt.clientX;
+            this._boxStartClientY = evt.clientY;
+            this._showSelectionBox();
+            evt.preventDefault();
+            evt.stopPropagation();
+            return;
+        }
         if (!targetEl.closest('.mm-node')) {
-            const isShift = evt.shiftKey || evt.getModifierState('Shift') || this._isShiftPressed;
-            const isCtrl = evt.ctrlKey || evt.getModifierState('Control') || this._isCtrlPressed;
-            const isMeta = evt.metaKey || evt.getModifierState('Meta') || this._isMetaPressed;
-            const isBoxSelectModifier = isShift || isCtrl || isMeta;
-            if (isBoxSelectModifier) {
-                // Shift/Ctrl/Cmd + drag on empty area = box selection mode
-                this._isBoxSelecting = true;
-                const rect = this.containerEL.getBoundingClientRect();
-                this._boxStartX = evt.pageX - rect.left + this.containerEL.scrollLeft;
-                this._boxStartY = evt.pageY - rect.top + this.containerEL.scrollTop;
-                this._boxStartClientX = evt.clientX;
-                this._boxStartClientY = evt.clientY;
-                this._showSelectionBox();
-                evt.preventDefault();
-            }
-            else {
-                // Normal drag: pan canvas
-                this.drag = true;
-                this.startX = evt.pageX;
-                this.startY = evt.pageY;
-                this._left = this.containerEL.scrollLeft;
-                this._top = this.containerEL.scrollTop;
-            }
+            // Normal drag: pan canvas
+            this.drag = true;
+            this.startX = evt.pageX;
+            this.startY = evt.pageY;
+            this._left = this.containerEL.scrollLeft;
+            this._top = this.containerEL.scrollTop;
         }
     }
     globalKeydown(evt) {
@@ -10418,7 +10469,7 @@ class MindMap {
             this._isShiftPressed = true;
         if (evt.key == 'Control')
             this._isCtrlPressed = true;
-        if (evt.key == 'Meta')
+        if (evt.key == 'Meta' || evt.key == 'OS' || evt.key == 'Super' || evt.code == 'MetaLeft' || evt.code == 'MetaRight')
             this._isMetaPressed = true;
     }
     globalKeyup(evt) {
@@ -10426,7 +10477,7 @@ class MindMap {
             this._isShiftPressed = false;
         if (evt.key == 'Control')
             this._isCtrlPressed = false;
-        if (evt.key == 'Meta')
+        if (evt.key == 'Meta' || evt.key == 'OS' || evt.key == 'Super' || evt.code == 'MetaLeft' || evt.code == 'MetaRight')
             this._isMetaPressed = false;
     }
     appMouseUp(evt) {
@@ -10457,28 +10508,30 @@ class MindMap {
         }
     }
     appMousewheel(evt) {
-        // if(!evt) evt = window.event;
         var ctrlKey = evt.ctrlKey || evt.metaKey;
-        var delta;
-        if (evt.wheelDelta) {
-            //IE、chrome  -120
+        if (!ctrlKey)
+            return;
+        var delta = 0;
+        if (typeof evt.deltaY == 'number' && evt.deltaY !== 0) {
+            delta = evt.deltaY < 0 ? 1 : -1;
+        }
+        else if (evt.wheelDelta) {
             delta = evt.wheelDelta / 120;
         }
         else if (evt.detail) {
-            //FF 3
             delta = -evt.detail / 3;
         }
-        if (delta) {
-            if (delta < 0) {
-                if (ctrlKey) {
-                    this.setScale("down");
-                }
-            }
-            else {
-                if (ctrlKey) {
-                    this.setScale("up");
-                }
-            }
+        if (!delta)
+            return;
+        if (evt.cancelable) {
+            evt.preventDefault();
+        }
+        evt.stopPropagation();
+        if (delta < 0) {
+            this.setScale("down", evt.clientX, evt.clientY);
+        }
+        else {
+            this.setScale("up", evt.clientX, evt.clientY);
         }
     }
     clearNode() {
@@ -10896,32 +10949,44 @@ class MindMap {
         }, this.root, true);
         return md.trim();
     }
-    scale(num) {
+    scale(num, anchorClientX, anchorClientY) {
         if (num < 20) {
             num = 20;
         }
         if (num > 300) {
             num = 300;
         }
-        this.mindScale = num;
-        if (this.scalePointer.length) {
-            this.appEl.style.transformOrigin = `${this.scalePointer[0]}px ${this.scalePointer[1]}px`;
-            this.appEl.style.transform = "scale(" + this.mindScale / 100 + ")";
+        const oldScale = this.mindScale / 100;
+        const newScale = num / 100;
+        let anchorX;
+        let anchorY;
+        const rect = this.containerEL.getBoundingClientRect();
+        if (typeof anchorClientX == 'number' && typeof anchorClientY == 'number') {
+            anchorX = anchorClientX - rect.left;
+            anchorY = anchorClientY - rect.top;
         }
         else {
-            this.appEl.style.transform = "scale(" + this.mindScale / 100 + ")";
+            anchorX = this.containerEL.clientWidth / 2;
+            anchorY = this.containerEL.clientHeight / 2;
         }
+        const worldX = (this.containerEL.scrollLeft + anchorX) / oldScale;
+        const worldY = (this.containerEL.scrollTop + anchorY) / oldScale;
+        this.mindScale = num;
+        this.appEl.style.transformOrigin = "0 0";
+        this.appEl.style.transform = "scale(" + this.mindScale / 100 + ")";
+        this.containerEL.scrollLeft = worldX * newScale - anchorX;
+        this.containerEL.scrollTop = worldY * newScale - anchorY;
         // Sync zoom panel UI
         this._syncZoomUI();
     }
-    setScale(type) {
+    setScale(type, anchorClientX, anchorClientY) {
         if (type == "up") {
             var n = this.mindScale + 10;
         }
         else {
             var n = this.mindScale - 10;
         }
-        this.scale(n);
+        this.scale(n, anchorClientX, anchorClientY);
     }
     copyNode(node) {
         var n = node || this.selectNode;

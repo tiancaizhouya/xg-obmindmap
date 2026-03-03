@@ -1,6 +1,6 @@
 {
   "name": "xg-obmindmap",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Enhanced mindmap plugin with multi-select nodes and zoom control panel.",
   "main": "main.js",
   "scripts": {
